@@ -1,125 +1,44 @@
-#include <Adafruit_NeoPixel.h>
-#include <WiFi.h>
-#include <WebServer.h>
-#include <HTTPClient.h>
-#include <ArduinoJson.h>
+# LED Strip Controller met ESP32
 
-#define LED_PIN 5
-#define NUM_LEDS 48
-#define UPDATE_INTERVAL 900000 // 15 minuten in milliseconden
+Dit project maakt gebruik van een ESP32 WROOM-32 om een WS2812B LED-strip aan te sturen, waarbij de kleuren van de LEDs worden aangepast op basis van de euro per kWh, rekening houdend met een dynamisch energiecontract. De prijzen worden opgehaald van de ENTSO-E API en omvatten inkoopkosten, energiebelasting en BTW.
 
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
-WebServer server(80);
+## Functionaliteit
 
-const char* ssid = "YOUR_SSID"; // Vervang door je WiFi SSID
-const char* password = "YOUR_PASSWORD"; // Vervang door je WiFi wachtwoord
+- **Individueel Aansturen van LEDs**: 48 WS2812B LEDs.
+- **Dynamische Kleurverandering**: Kleurinstellingen gebaseerd op de euro per kWh per kwartier.
+- **Webinterface**: Eenvoudige bediening via een webbrowser.
 
-unsigned long lastUpdate = 0;
-float prices[NUM_LEDS]; // Array om prijzen voor 12 uur op te slaan
-float minPrice = FLT_MAX; // Minimale prijs initialiseren
-float maxPrice = FLT_MIN; // Maximale prijs initialiseren
+## Benodigdheden
 
-// Definieer belastingpercentages en tarieven
-const float energyTax = 0.21; // Energiebelasting (bijv. 21%)
-const float VAT = 0.21; // BTW (bijv. 21%)
-const float basePrice = 0.10; // Basisprijs per kWh (bijv. €0,10)
+- ESP32 WROOM-32
+- WS2812B LED-strip (48 LEDs)
+- Arduino IDE
+- WiFi-verbinding
+- ArduinoJson-bibliotheek
 
-void setup() {
-  Serial.begin(115200);
-  strip.begin();
-  strip.show(); // Initialize all pixels to 'off'
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Verbinden met WiFi...");
-  }
-  Serial.println("Verbonden met WiFi");
+## Installatie
 
-  server.on("/", handleRoot);
-  server.on("/update", handleUpdate);
-  server.begin();
-}
+1. **Arduino IDE**: Zorg ervoor dat je de Arduino IDE hebt geïnstalleerd.
+2. **Bibliotheken**: Installeer de volgende bibliotheken via de Library Manager:
+   - Adafruit NeoPixel
+   - WiFi
+   - WebServer
+   - HTTPClient
+   - ArduinoJson
+3. **Code**: Plaats de code in een nieuw sketch-bestand (`LEDStripController.ino`).
+4. **Configuratie**: Vervang `YOUR_SSID` en `YOUR_PASSWORD` door je eigen WiFi-gegevens. Vul de juiste API-URL in de `getEnergyPrice` functie in.
+5. **Uploaden**: Selecteer het juiste bord en de juiste poort in de Arduino IDE en upload de code naar de ESP32.
 
-void loop() {
-  server.handleClient();
-  if (millis() - lastUpdate > UPDATE_INTERVAL) {
-    lastUpdate = millis();
-    updatePrices();
-    updateLEDs();
-  }
-}
+## Gebruik
 
-void updatePrices() {
-  minPrice = FLT_MAX; // Reset minPrice
-  maxPrice = FLT_MIN; // Reset maxPrice
+- Na het uploaden, open je een webbrowser en voer je het IP-adres van de ESP32 in om de webinterface te openen.
+- Klik op de link om de LED-strip bij te werken met de nieuwste energieprijzen.
 
-  for (int i = 0; i < NUM_LEDS; i++) {
-    prices[i] = getEnergyPrice(); // Haal de prijs op voor elke LED
-    if (prices[i] < minPrice) minPrice = prices[i]; // Update minPrice
-    if (prices[i] > maxPrice) maxPrice = prices[i]; // Update maxPrice
-  }
-}
+## Code Overzicht
 
-float getEnergyPrice() {
-  HTTPClient http;
-  String url = "https://api.entsoe.eu/prices?..." // Vul hier de juiste API URL in met parameters
-  http.begin(url);
-  int httpCode = http.GET();
-  
-  if (httpCode > 0) {
-    String payload = http.getString();
-    float marketPrice = parsePriceFromPayload(payload); // Voeg hier je parsing logica toe
+- **Prijsberekening**: De totale prijs per kWh wordt berekend door de basisprijs, de marktprijs, de inkoopkosten, de energiebelasting en de BTW bij elkaar op te tellen.
+- **Kleurinstelling**: De kleur van de LED-strip wordt aangepast op basis van de geschaalde prijs, met een heatmap-kleurenschema.
 
-    // Bereken de totale prijs inclusief belasting en BTW
-    float totalPrice = basePrice + marketPrice; // Basisprijs + marktprijs
-    totalPrice += totalPrice * energyTax; // Voeg energiebelasting toe
-    totalPrice += totalPrice * VAT; // Voeg BTW toe
+## Licentie
 
-    return totalPrice; // Retourneer de totale prijs
-  } else {
-    Serial.println("Fout bij het ophalen van de prijs");
-    return 0.0; // Fallback waarde
-  }
-  http.end();
-}
-
-void updateLEDs() {
-  int currentHour = (millis() / UPDATE_INTERVAL / 60) % 12; // Huidige uur (0-11)
-  int ledIndex = (currentHour * NUM_LEDS) / 12; // Bepaal welke LED moet worden bijgewerkt
-
-  // Schaal de prijs naar een percentage van 0% tot 100%
-  float scaledPrice = map(prices[ledIndex], minPrice, maxPrice, 0, 100);
-  int colorValue = constrain(scaledPrice, 0, 100); // Zorg ervoor dat de waarde tussen 0 en 100 blijft
-  uint32_t color = heatmapColor(colorValue);
-  strip.setPixelColor(ledIndex, color);
-  strip.show();
-}
-
-uint32_t heatmapColor(int value) {
-  if (value < 50) {
-    return strip.Color(0, 255, value * 5); // Van groen naar geel
-  } else {
-    return strip.Color((value - 50) * 5, 255, 0); // Van geel naar rood
-  }
-}
-
-void handleRoot() {
-  String html = "<html><body><h1>LED Strip Controller</h1>";
-  html += "<p><a href=\"/update\">Update LED Strip</a></p>";
-  html += "</body></html>";
-  server.send(200, "text/html", html);
-}
-
-void handleUpdate() {
-  updatePrices();
-  server.send(200, "text/plain", "LED Strip Updated with new prices.");
-}
-
-// Functie om de prijs uit de payload te parseren
-float parsePriceFromPayload(String payload) {
-  // Voorbeeld van JSON parsing
-  DynamicJsonDocument doc(1024);
-  deserializeJson(doc, payload);
-  float price = doc["price"]; // Pas aan op basis van de juiste JSON-structuur
-  return price;
-}
+Dit project is gelicentieerd onder de MIT-licentie. Zie het LICENSE bestand voor meer informatie.
