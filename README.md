@@ -1,46 +1,98 @@
-# LED Strip Controller met ESP32
+#include <Adafruit_NeoPixel.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <HTTPClient.h>
 
-Dit project maakt gebruik van een ESP32 WROOM-32 om een WS2812 LED-strip aan te sturen. De LED-strip verandert van kleur op basis van de energieprijzen die worden opgehaald van de ENTSO-E API. De kleuren zijn geïnspireerd door een warmtebeeldcamera.
+#define LED_PIN 5
+#define NUM_LEDS 48
+#define UPDATE_INTERVAL 900000 // 15 minuten in milliseconden
 
-## Inhoud
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
+WebServer server(80);
 
-- Kenmerken
-- Benodigdheden
-- Installatie
-- Gebruik
-- Licentie
+const char* ssid = "YOUR_SSID"; // Vervang door je WiFi SSID
+const char* password = "YOUR_PASSWORD"; // Vervang door je WiFi wachtwoord
 
-## Kenmerken
+unsigned long lastUpdate = 0;
+float prices[NUM_LEDS]; // Array om prijzen voor 12 uur op te slaan
 
-- Aansturing van een WS2812 LED-strip met 48 LEDs.
-- Kleurverandering op basis van energieprijzen.
-- Eenvoudige webinterface voor bediening.
-- Kleurenschema geïnspireerd door warmtebeeldcamera's.
+void setup() {
+  Serial.begin(115200);
+  strip.begin();
+  strip.show(); // Initialize all pixels to 'off'
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Verbinden met WiFi...");
+  }
+  Serial.println("Verbonden met WiFi");
 
-## Benodigdheden
+  server.on("/", handleRoot);
+  server.on("/update", handleUpdate);
+  server.begin();
+}
 
-- ESP32 WROOM-32
-- WS2812 LED-strip (48 LEDs)
-- Arduino IDE
-- WiFi-verbinding
+void loop() {
+  server.handleClient();
+  if (millis() - lastUpdate > UPDATE_INTERVAL) {
+    lastUpdate = millis();
+    updatePrices();
+    updateLEDs();
+  }
+}
 
-## Installatie
+void updatePrices() {
+  for (int i = 0; i < NUM_LEDS; i++) {
+    prices[i] = getEnergyPrice(i); // Haal de prijs op voor elke LED
+  }
+}
 
-1. **Arduino IDE**: Zorg ervoor dat je de Arduino IDE hebt geïnstalleerd.
-2. **Bibliotheken**: Installeer de volgende bibliotheken via de Library Manager:
-   - Adafruit NeoPixel
-   - WiFi
-   - WebServer
-   - HTTPClient
-3. **Code**: Kopieer de code uit `LEDStripController.ino` en plak deze in de Arduino IDE.
-4. **Configuratie**: Vervang `YOUR_SSID` en `YOUR_PASSWORD` door je eigen WiFi-gegevens.
-5. **Uploaden**: Selecteer het juiste bord en de juiste poort in de Arduino IDE en upload de code naar de ESP32.
+float getEnergyPrice(int hourOffset) {
+  HTTPClient http;
+  String url = "https://api.entsoe.eu/..."; // Vul hier de juiste API URL in
+  // Voeg hier logica toe om de juiste prijs op te halen op basis van hourOffset
+  http.begin(url);
+  int httpCode = http.GET();
+  
+  if (httpCode > 0) {
+    String payload = http.getString();
+    // Parse de JSON om de prijs te krijgen (afhankelijk van de API structuur)
+    // Voorbeeld: float price = ...;
+    return price; // Vervang door de juiste prijs
+  } else {
+    Serial.println("Fout bij het ophalen van de prijs");
+    return 0.0; // Fallback waarde
+  }
+  http.end();
+}
 
-## Gebruik
+void updateLEDs() {
+  int currentHour = (millis() / UPDATE_INTERVAL / 60) % 24; // Huidige uur
+  int ledIndex = (currentHour + 12) % NUM_LEDS; // Bepaal welke LED moet worden bijgewerkt
 
-- Zodra de ESP32 is verbonden met WiFi, open je een webbrowser en voer je het IP-adres van de ESP32 in om de webinterface te openen.
-- Klik op de link om de LED-strip bij te werken met de nieuwste energieprijs.
+  // Bepaal de kleur op basis van de energieprijs
+  int colorValue = map(prices[ledIndex], 0, 100, 0, 255); // Schaal de prijs naar een kleurwaarde
+  uint32_t color = heatmapColor(colorValue);
+  strip.setPixelColor(ledIndex, color);
+  strip.show();
+}
 
-## Licentie
+uint32_t heatmapColor(int value) {
+  if (value < 128) {
+    return strip.Color(0, 255, value * 2); // Van groen naar geel
+  } else {
+    return strip.Color((value - 128) * 2, 255, 0); // Van geel naar rood
+  }
+}
 
-Dit project is gelicentieerd onder de MIT-licentie. Zie het LICENSE bestand voor meer informatie.
+void handleRoot() {
+  String html = "<html><body><h1>LED Strip Controller</h1>";
+  html += "<p><a href=\"/update\">Update LED Strip</a></p>";
+  html += "</body></html>";
+  server.send(200, "text/html", html);
+}
+
+void handleUpdate() {
+  updatePrices();
+  server.send(200, "text/plain", "LED Strip Updated with new prices.");
+}
