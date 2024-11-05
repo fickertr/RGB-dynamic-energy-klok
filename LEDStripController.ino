@@ -2,7 +2,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
-#include <ArduinoJson.h> // Zorg ervoor dat je deze bibliotheek hebt geïnstalleerd
+#include <ArduinoJson.h>
 
 #define LED_PIN 5
 #define NUM_LEDS 48
@@ -19,7 +19,7 @@ float prices[NUM_LEDS]; // Array om prijzen voor 12 uur op te slaan
 float minPrice = FLT_MAX; // Minimale prijs initialiseren
 float maxPrice = FLT_MIN; // Maximale prijs initialiseren
 
-// Definieer belastingpercentages
+// Definieer belastingpercentages en tarieven
 const float energyTax = 0.21; // Energiebelasting (bijv. 21%)
 const float VAT = 0.21; // BTW (bijv. 21%)
 const float basePrice = 0.10; // Basisprijs per kWh (bijv. €0,10)
@@ -54,15 +54,15 @@ void updatePrices() {
   maxPrice = FLT_MIN; // Reset maxPrice
 
   for (int i = 0; i < NUM_LEDS; i++) {
-    prices[i] = getEnergyPrice(i); // Haal de prijs op voor elke LED
+    prices[i] = getEnergyPrice(); // Haal de prijs op voor elke LED
     if (prices[i] < minPrice) minPrice = prices[i]; // Update minPrice
     if (prices[i] > maxPrice) maxPrice = prices[i]; // Update maxPrice
   }
 }
 
-float getEnergyPrice(int hourOffset) {
+float getEnergyPrice() {
   HTTPClient http;
-  String url = "https://api.entsoe.eu/..."; // Vul hier de juiste API URL in met parameters
+  String url = "https://api.entsoe.eu/prices?..." // Vul hier de juiste API URL in met parameters
   http.begin(url);
   int httpCode = http.GET();
   
