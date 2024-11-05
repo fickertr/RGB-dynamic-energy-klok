@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
+#include <ArduinoJson.h> // Zorg ervoor dat je deze bibliotheek hebt geïnstalleerd
 
 #define LED_PIN 5
 #define NUM_LEDS 48
@@ -15,6 +16,13 @@ const char* password = "YOUR_PASSWORD"; // Vervang door je WiFi wachtwoord
 
 unsigned long lastUpdate = 0;
 float prices[NUM_LEDS]; // Array om prijzen voor 12 uur op te slaan
+float minPrice = FLT_MAX; // Minimale prijs initialiseren
+float maxPrice = FLT_MIN; // Maximale prijs initialiseren
+
+// Definieer belastingpercentages
+const float energyTax = 0.21; // Energiebelasting (bijv. 21%)
+const float VAT = 0.21; // BTW (bijv. 21%)
+const float basePrice = 0.10; // Basisprijs per kWh (bijv. €0,10)
 
 void setup() {
   Serial.begin(115200);
@@ -42,23 +50,32 @@ void loop() {
 }
 
 void updatePrices() {
+  minPrice = FLT_MAX; // Reset minPrice
+  maxPrice = FLT_MIN; // Reset maxPrice
+
   for (int i = 0; i < NUM_LEDS; i++) {
     prices[i] = getEnergyPrice(i); // Haal de prijs op voor elke LED
+    if (prices[i] < minPrice) minPrice = prices[i]; // Update minPrice
+    if (prices[i] > maxPrice) maxPrice = prices[i]; // Update maxPrice
   }
 }
 
 float getEnergyPrice(int hourOffset) {
   HTTPClient http;
-  String url = "https://api.entsoe.eu/..."; // Vul hier de juiste API URL in
-  // Voeg hier logica toe om de juiste prijs op te halen op basis van hourOffset
+  String url = "https://api.entsoe.eu/..."; // Vul hier de juiste API URL in met parameters
   http.begin(url);
   int httpCode = http.GET();
   
   if (httpCode > 0) {
     String payload = http.getString();
-    // Parse de JSON om de prijs te krijgen (afhankelijk van de API structuur)
-    // Voorbeeld: float price = ...;
-    return price; // Vervang door de juiste prijs
+    float marketPrice = parsePriceFromPayload(payload); // Voeg hier je parsing logica toe
+
+    // Bereken de totale prijs inclusief belasting en BTW
+    float totalPrice = basePrice + marketPrice; // Basisprijs + marktprijs
+    totalPrice += totalPrice * energyTax; // Voeg energiebelasting toe
+    totalPrice += totalPrice * VAT; // Voeg BTW toe
+
+    return totalPrice; // Retourneer de totale prijs
   } else {
     Serial.println("Fout bij het ophalen van de prijs");
     return 0.0; // Fallback waarde
@@ -67,21 +84,22 @@ float getEnergyPrice(int hourOffset) {
 }
 
 void updateLEDs() {
-  int currentHour = (millis() / UPDATE_INTERVAL / 60) % 24; // Huidige uur
-  int ledIndex = (currentHour + 12) % NUM_LEDS; // Bepaal welke LED moet worden bijgewerkt
+  int currentHour = (millis() / UPDATE_INTERVAL / 60) % 12; // Huidige uur (0-11)
+  int ledIndex = (currentHour * NUM_LEDS) / 12; // Bepaal welke LED moet worden bijgewerkt
 
-  // Bepaal de kleur op basis van de energieprijs
-  int colorValue = map(prices[ledIndex], 0, 100, 0, 255); // Schaal de prijs naar een kleurwaarde
+  // Schaal de prijs naar een percentage van 0% tot 100%
+  float scaledPrice = map(prices[ledIndex], minPrice, maxPrice, 0, 100);
+  int colorValue = constrain(scaledPrice, 0, 100); // Zorg ervoor dat de waarde tussen 0 en 100 blijft
   uint32_t color = heatmapColor(colorValue);
   strip.setPixelColor(ledIndex, color);
   strip.show();
 }
 
 uint32_t heatmapColor(int value) {
-  if (value < 128) {
-    return strip.Color(0, 255, value * 2); // Van groen naar geel
+  if (value < 50) {
+    return strip.Color(0, 255, value * 5); // Van groen naar geel
   } else {
-    return strip.Color((value - 128) * 2, 255, 0); // Van geel naar rood
+    return strip.Color((value - 50) * 5, 255, 0); // Van geel naar rood
   }
 }
 
@@ -95,4 +113,13 @@ void handleRoot() {
 void handleUpdate() {
   updatePrices();
   server.send(200, "text/plain", "LED Strip Updated with new prices.");
+}
+
+// Functie om de prijs uit de payload te parseren
+float parsePriceFromPayload(String payload) {
+  // Voorbeeld van JSON parsing
+  DynamicJsonDocument doc(1024);
+  deserializeJson(doc, payload);
+  float price = doc["price"]; // Pas aan op basis van de juiste JSON-structuur
+  return price;
 }
